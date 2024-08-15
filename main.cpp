@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <iostream>
 #include <vector>
 #include "int.hpp"
@@ -97,6 +98,24 @@ int main() {
 
     }
 
+    InRange<int, 0, 10> xxxx(9);
+    auto blub = constant<int, 5> - xxxx;
 
+    InRange<int, 0, 10> yyyy = N<int>(10).assume_gteq<0>().assume_lteq<10>();
+    yyyy.compiler_hint();
+    if (yyyy> 10)
+        return 1;
+
+
+    safe_array<int, 11> arr;
+
+    size_t i = 10;
+    arr[i] = 0;
+    InRange<size_t, 0, 10> ii(9);
+    arr[ii] = 0;
     // test1(result);
+    safe_ptr<int, 0, 10> ptr = arr;
+
+    auto ptr2 = ptr + constant<std::ptrdiff_t, 3>;
+    
 }

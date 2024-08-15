@@ -1,19 +1,11 @@
 
+#include <array>
 #include <concepts>
-#include <cstdint>
+#include <cstddef>
 #include <functional>
-#include <memory>
 #include <type_traits>
-#include <typeindex>
 #include <optional>
-#include <ratio>
 
-struct ratio_trait_t {};
-
-template <intmax_t num, intmax_t den>
-struct ratio : std::ratio<num, den>, ratio_trait_t {
-
-};
 
 #if __cplusplus == 202302L
 #include <utility>
@@ -124,13 +116,13 @@ class N<T> {
         using Self = N<T>;
         constexpr N(T x) : x(x) { static_assert(std::is_trivially_copyable<Self>()); }
         constexpr operator T&() { return x; }
-        constexpr operator T&() const { return x; }
+        constexpr operator const T&() const { return x; }
         template<signed_int TT> requires (std::is_same_v<std::common_type_t<T, TT>, TT>)
         constexpr operator N<TT>() const { return N<TT>(x); }
 
         template<T n>
         constexpr LessThanEq<T, n> assume_lteq() const {
-            return LessThanEq<T, n>(x);
+            return LessThanEq<T, n>(*this);
         }
         template<T n>
         std::optional<LessThanEq<T, n>> constrain_lteq() const {
@@ -141,7 +133,7 @@ class N<T> {
         template<has_validator<T> U>
         constexpr U assume() const {
             if (!U::is_valid(x)) unreachable();
-            return U(x);
+            return U(*this);
         }
 
         template<has_validator<T> U>
@@ -152,7 +144,7 @@ class N<T> {
 
         template<T n>
         constexpr GreaterThanEq<T, n> assume_gteq() const {
-            return GreaterThanEq<T, n>(x);
+            return GreaterThanEq<T, n>(*this);
         }
         template<T n>
         std::optional<GreaterThanEq<T, n>> constrain_gteq() const {
@@ -184,13 +176,25 @@ template<unsigned_int T>
 class N<T> {
     public:
         using Self = N<T>;
-        N(T x) : x(x) { static_assert(std::is_trivially_copyable<Self>()); }
+        constexpr N(T x) : x(x) { static_assert(std::is_trivially_copyable<Self>()); }
         operator T&() { return x; }
         operator T&() const { return x; } 
 
         template<T n, T m>
         constexpr InRange<T, n, m> assume_in_range() const {
             return InRange<T, n, m>(x);
+        }
+
+        template<has_validator<T> U>
+        constexpr U assume() const {
+            if (!U::is_valid(x)) unreachable();
+            return U(*this);
+        }
+
+        template<has_validator<T> U>
+        std::optional<U> constrain() const {
+            if (!U::is_valid(x)) return std::nullopt;
+            return assume<U>();
         }
         template<T n, T m>
         std::optional<InRange<T, n, m>> constrain_to_range() const {
@@ -212,7 +216,7 @@ template<signed_int T, T n>
 class LessThanEq : public N<T>, public SafeInPlaceOps<T, LessThanEq<T, n>> {
     private:
         using Self = LessThanEq<T, n>; 
-        constexpr LessThanEq(T x) : N<T>(x) { compiler_hint(); static_assert(std::is_trivially_copyable<Self>()); }
+        constexpr LessThanEq(N<T> x) : N<T>(x) { compiler_hint(); static_assert(std::is_trivially_copyable<Self>()); }
         template<std::integral>
         friend class N;
         template<signed_int TT, TT>
@@ -237,13 +241,14 @@ class LessThanEq : public N<T>, public SafeInPlaceOps<T, LessThanEq<T, n>> {
 
     public:
         constexpr LessThanEq() : N<T>(n) { compiler_hint(); static_assert(std::is_trivially_copyable<Self>()); }
+        consteval LessThanEq(T x) : N<T>(x) { compiler_hint(); }
 
         template<T m> requires (m > n)
-        constexpr operator LessThanEq<T, m>() const { return LessThanEq<T, m>(this->x); };
+        constexpr operator LessThanEq<T, m>() const { return LessThanEq<T, m>(*this); };
 
         template<T m>
         constexpr InRange<T, m, n> assume_gteq() const {
-            return InRange<T, m, n>(this->x);
+            return InRange<T, m, n>(*this);
         }
         template<T m>
         std::optional<InRange<T, m, n>> constrain_gteq() const {
@@ -253,12 +258,12 @@ class LessThanEq : public N<T>, public SafeInPlaceOps<T, LessThanEq<T, n>> {
 
         template<T m>
         constexpr LessThanEq<T, m + n> operator+(LessThanEq<T, m> other) const {
-            return LessThanEq<T, m + n>(this->x + other.x);
+            return LessThanEq<T, m + n>(N<T>(this->x + other.x));
         }
 
         template<T m>
         constexpr LessThanEq<T, n - m> operator-(GreaterThanEq<T, m> other) const {
-            return LessThanEq<T, n - m>(this->x - other.x);
+            return LessThanEq<T, n - m>(N<T>(this->x - other.x));
         }
 
         
@@ -318,7 +323,7 @@ template<signed_int T, T n>
 class GreaterThanEq : public N<T>, public SafeInPlaceOps<T, GreaterThanEq<T, n>> {
     private:
         using Self = GreaterThanEq<T, n>;
-        constexpr GreaterThanEq(T x) : N<T>(x) { compiler_hint(); static_assert(std::is_trivially_copyable<Self>()); }
+        constexpr GreaterThanEq(N<T> x) : N<T>(x) { compiler_hint(); static_assert(std::is_trivially_copyable<Self>()); }
         template<std::integral>
         friend class N;
         template<signed_int TT, TT>
@@ -342,13 +347,14 @@ class GreaterThanEq : public N<T>, public SafeInPlaceOps<T, GreaterThanEq<T, n>>
         Self& operator&=(int) { unreachable(); return *this; }
     public:
         constexpr GreaterThanEq() : N<T>(n) { compiler_hint(); static_assert(std::is_trivially_copyable<Self>()); }
+        consteval GreaterThanEq(T x) : N<T>(x) { compiler_hint(); }
 
         template<T m> requires (m < n)
-        constexpr operator GreaterThanEq<T, m>() const { return GreaterThanEq<T, m>(this->x); }
+        constexpr operator GreaterThanEq<T, m>() const { return GreaterThanEq<T, m>(*this); }
 
         template<T m>
         constexpr InRange<T, n, m> assume_lteq() const {
-            return InRange<T, n, m>(this->x);
+            return InRange<T, n, m>(*this);
         }
         template<T m>
         std::optional<InRange<T, n, m>> contrain_lteq() const {
@@ -358,12 +364,12 @@ class GreaterThanEq : public N<T>, public SafeInPlaceOps<T, GreaterThanEq<T, n>>
 
         template<T m>
         constexpr GreaterThanEq<T, m + n> operator+(GreaterThanEq<T, m> other) const {
-            return GreaterThanEq<T, m + n>(this->x + other.x);
+            return GreaterThanEq<T, m + n>(N<T>(this->x + other.x));
         }
 
         template<T m>
         constexpr GreaterThanEq<T, n - m> operator-(LessThanEq<T, m> other) const {
-            return GreaterThanEq<T, n - m>(this->x - other.x);
+            return GreaterThanEq<T, n - m>(N<T>(this->x - other.x));
         }
 
         template<signed_int TT, signed_int TTT = T>
@@ -400,7 +406,7 @@ template<signed_int T, T n, T m> requires(n <= m)
 class InRange<T, n, m> : public N<T>, public SafeInPlaceOps<T, InRange<T, n, m>> {
     private:
         using Self = InRange<T, n, m>;
-        constexpr InRange(T x) : N<T>(x) { compiler_hint(); }
+        constexpr InRange(N<T> x) : N<T>(x) { compiler_hint(); }
         template<std::integral>
         friend class N;
         template<signed_int TT, TT>
@@ -427,26 +433,27 @@ class InRange<T, n, m> : public N<T>, public SafeInPlaceOps<T, InRange<T, n, m>>
         Self& operator&=(int) { unreachable(); return *this; }
     public:
         constexpr InRange() : N<T>(n) { compiler_hint(); static_assert(std::is_trivially_copyable<Self>()); }
+        consteval InRange(T x) : N<T>(x) { compiler_hint(); }
 
         template<unsigned_int TT>
-        constexpr operator InRange<TT, n, m>() const { return InRange<TT, n, m>(this->x); }
+        constexpr operator InRange<TT, n, m>() const { return InRange<TT, n, m>(*this); }
 
         template<signed_int TT, TT nn, TT mm> requires (nn <= n && mm >= m)
-        constexpr operator InRange<TT, nn, mm>() const { return InRange<TT, nn, mm>(this->x); }
+        constexpr operator InRange<TT, nn, mm>() const { return InRange<TT, nn, mm>(*this); }
 
         template<signed_int TT, TT mm> requires (mm >= m)
-        constexpr operator LessThanEq<TT, mm>() const { return LessThanEq<TT, mm>(this->x); }
+        constexpr operator LessThanEq<TT, mm>() const { return LessThanEq<TT, mm>(*this); }
         template<signed_int TT, TT nn> requires (nn <= n)
-        constexpr operator GreaterThanEq<TT, nn>() const { return GreaterThanEq<TT, nn>(this->x); }
+        constexpr operator GreaterThanEq<TT, nn>() const { return GreaterThanEq<TT, nn>(*this); }
 
         template<signed_int TT, TT nn, TT mm>
         constexpr InRange<std::common_type_t<T, TT>, n + nn, m + mm> operator+(InRange<TT, nn, mm> other) const {
-            return InRange<std::common_type_t<T, TT>, n + nn, m + mm>(this->x + other.x);
+            return InRange<std::common_type_t<T, TT>, n + nn, m + mm>(N<T>(this->x + other.x));
         }
 
         template<signed_int TT, TT nn, TT mm>
         constexpr auto operator-(InRange<TT, nn, mm> other) const {
-            return *this + InRange<TT, -mm, -nn>(-other.x);
+            return *this + InRange<TT, -mm, -nn>(N<TT>(-other.x));
         }
 
         template<signed_int TT, T nn>
@@ -471,7 +478,7 @@ class InRange<T, n, m> : public N<T>, public SafeInPlaceOps<T, InRange<T, n, m>>
 
         template<T mm>
         constexpr InRange<T, n, mm> assume_lteq() const {
-            return InRange<T, n, mm>(this->x);
+            return InRange<T, n, mm>(*this);
         }
         template<T mm>
         std::optional<InRange<T, n, mm>> constrain_lteq() const {
@@ -481,7 +488,7 @@ class InRange<T, n, m> : public N<T>, public SafeInPlaceOps<T, InRange<T, n, m>>
 
         template<T nn>
         constexpr InRange<T, nn, m> assume_gteq() const {
-            return InRange<T, nn, m>(this->x);
+            return InRange<T, nn, m>(*this);
         }
         template<T nn>
         std::optional<InRange<T, nn, m>> constrain_gteq() const {
@@ -529,7 +536,7 @@ template<unsigned_int T, T n, T m> requires (n - 1 != m)
 class InRange<T, n, m> : public N<T> {
     private:
         using Self = InRange<T, n, m>;
-        InRange(T x) : N<T>(x) { compiler_hint(); static_assert(std::is_trivially_copyable<Self>()); }
+        constexpr InRange(N<T> x) : N<T>(x) { compiler_hint(); static_assert(std::is_trivially_copyable<Self>()); }
         template<std::integral>
         friend class N;
         template<signed_int TT, TT>
@@ -554,25 +561,25 @@ class InRange<T, n, m> : public N<T> {
         Self& operator&=(T x) { this->x += x; return *this; }
 
     public:
-        inline static const InRange<T, n, m> constant = InRange<T, n, m>(n);
-        InRange() : N<T>(n) { compiler_hint(); static_assert(std::is_trivially_copyable<Self>()); }
+        constexpr InRange() : N<T>(n) { compiler_hint(); static_assert(std::is_trivially_copyable<Self>()); }
+        consteval InRange(T x) : N<T>(x) { compiler_hint(); }
 
         template<signed_int TT> requires (n <= m)
-        operator InRange<TT, n, m>() const { return InRange<TT, n, m>(this->x); }
+        operator InRange<TT, n, m>() const { return InRange<TT, n, m>(*this); }
 
         template<unsigned_int TT, TT nn, TT mm> requires ((nn <= mm && nn <= n && mm >= m) ||  (nn > mm)) // todo fix constraint
-        operator InRange<TT, nn, mm>() const { return InRange<TT, nn, mm>(this->x); }
+        operator InRange<TT, nn, mm>() const { return InRange<TT, nn, mm>(*this); }
 
         template<unsigned_int TT, TT nn, TT mm>
         InRange<std::common_type_t<TT, T>, n + nn, m + mm> operator+(InRange<TT, nn, mm> other) const {
             using CT = std::common_type_t<T, TT>;
-            if constexpr ((mm - nn) + (m - n) < (mm - nn)) return N<CT>(this->x + other.x);
-            return InRange<CT, n + nn, m + mm>(this->x + other.x);
+            if constexpr ((mm - nn) + (m - n) < (mm - nn)) return N<CT>(N<T>(this->x + other.x));
+            return InRange<CT, n + nn, m + mm>(N<T>(this->x + other.x));
         }
 
         template<unsigned_int TT, TT nn, TT mm>
         auto operator-(InRange<TT, nn, mm> other) const {
-            return *this + InRange<TT, -mm, -nn>(-other.x);
+            return *this + InRange<TT, -mm, -nn>(N<TT>(-other.x));
         }
 
         
@@ -589,11 +596,15 @@ class InRange<T, n, m> : public N<T> {
             return static_cast<N<T>&>(*this).template assume_in_range<nn, mm>();
         }
 
-        void compiler_hint() {
+        constexpr void compiler_hint() {
+            if (!Self::is_valid(this->x)) unreachable();
+        }
+
+        constexpr static bool is_valid(T x) {
             if constexpr (m >= n) {
-                if (this->x < n || this->x > m) unreachable();
+                return (x >= n && x <= m);
             } else {
-                if (this->x < n && this->x > m) unreachable();
+                return (x >= n || x <= m);
             }
         }
 
@@ -742,4 +753,72 @@ struct RangeInterval<T, n, m> {
         GreaterThanEq<T, n> first;
         LessThanEq<T, m> sentinel;
         GreaterThanEq<T, 1> step;
+};
+
+template<typename T, size_t n>
+class safe_array;
+
+template<typename T, std::ptrdiff_t n = 0, std::ptrdiff_t m = 1>
+class safe_ptr {
+    private:
+        template<typename, std::ptrdiff_t, std::ptrdiff_t>
+        friend class safe_ptr;
+        template<typename, size_t>
+        friend class safe_array;
+
+        using Self = safe_ptr<T, n, m>;
+        constexpr safe_ptr(T* pointer) : pointer(pointer) { static_assert(std::is_trivially_copyable<safe_ptr<T, n, m>>()); }
+
+    public:
+        template<std::ptrdiff_t nn, std::ptrdiff_t mm> requires(nn <= n && mm >= m && !(nn == n && mm == m))
+        constexpr safe_ptr(safe_ptr<T, nn, mm> other) : pointer(other.pointer) { static_assert(std::is_trivially_copyable<safe_ptr<T, n, m>>()); }
+        constexpr safe_ptr(T& obj) requires(n == 0 && m == 1) : pointer(&obj) { static_assert(std::is_trivially_copyable<safe_ptr<T, n, m>>()); }
+        template<typename TT> requires(n == 0 && m == 1 && std::convertible_to<TT*, T*>)
+        constexpr safe_ptr(safe_ptr<TT> other) : pointer(other.pointer) { static_assert(std::is_trivially_copyable<safe_ptr<T, n, m>>()); }
+
+        template<std::ptrdiff_t nn = 0, std::ptrdiff_t mm = 0> requires(nn >= n && mm < m)
+        safe_ptr<T> to_singleton(InRange<std::ptrdiff_t, nn, mm> i = constant<std::ptrdiff_t, 0>) const {
+            return safe_ptr<T>(&pointer[i]);
+        }
+
+        constexpr T& operator*() const requires(n <= 0 && m > 0) { return *pointer; }
+        constexpr T* operator->() const requires(n <= 0 && m > 0) { return pointer; }
+
+        template<std::ptrdiff_t nn, std::ptrdiff_t mm> requires(n <= nn && m > mm)
+        constexpr T& operator[](InRange<std::ptrdiff_t, nn, mm> i) const { return pointer[i]; }
+        template<std::ptrdiff_t l, std::ptrdiff_t u>
+        constexpr safe_ptr<T, n - l, m - u> operator+(InRange<std::ptrdiff_t, l, u> x) {
+            return safe_ptr<T, n - l, m - u>(pointer);
+        }
+    private:
+        T* pointer;
+};
+
+
+template<typename T>
+safe_ptr<T, 0, 1> safe_ptr_to(T& x) {
+    return safe_ptr<T, 0, 1>(x);
+}
+
+template<typename T, size_t n>
+class safe_array : public std::array<T, n> {
+    public:
+        using std::array<T, n>::array;
+    private:
+        T& operator[](size_t i) { return (*static_cast<std::array<T, n>*>(this))[i]; }
+        const T& operator[](size_t i) const { return (*static_cast<const std::array<T, n>*>(this))[i]; }
+    public:
+        template<size_t l, size_t u> requires(l >= 0 && u < n)
+        T& operator[](InRange<size_t, l, u> i) { return (*this)[static_cast<int>(i)]; }
+        template<size_t l, size_t u> requires(l >= 0 && u < n)
+        const T& operator[](InRange<size_t, l, u> i) const { return (*this)[static_cast<int>(i)]; }
+        template<std::ptrdiff_t l, std::ptrdiff_t u> requires(l >= 0 && u <= n)
+        operator safe_ptr<T, l, u>() {
+            return safe_ptr<T, l, u>(&this->front());
+        }
+        template<std::ptrdiff_t l, std::ptrdiff_t u> requires(l >= 0 && u <= n)
+        operator safe_ptr<const T, l, u>() const {
+            return safe_ptr<const T, l, u>(&this->front());
+        }
+
 };
